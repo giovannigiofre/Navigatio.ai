@@ -12,12 +12,20 @@ from app.graph.workflow import create_workflow
 
 app = FastAPI(title="Navigatio.ai Agent Backend")
 
+# Configure CORS - must be added before routes
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://192.168.1.199:3000",  # Network access
+    ],
+    allow_credentials=False,  # Set to False to avoid CORS issues with credentials
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept"],
+    max_age=3600,  # Cache preflight responses for 1 hour
 )
 
 # Initialize the graph
@@ -26,6 +34,10 @@ graph = create_workflow()
 class PlanRequest(BaseModel):
     message: str
     history: Optional[List[Dict[str, Any]]] = []
+
+@app.options("/plan")
+async def plan_options():
+    return {"status": "ok"}
 
 @app.post("/plan")
 async def plan_trip(request: PlanRequest):

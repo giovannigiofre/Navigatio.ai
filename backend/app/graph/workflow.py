@@ -9,7 +9,8 @@ from app.agents.specialists import get_specialists
 def create_workflow():
     # Initialize LLM
     # Note: Requires GOOGLE_API_KEY in environment
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro")
+    # Using gemini-2.5-flash-preview due to quota limits on gemini-2.5-pro
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-09-2025")
     
     # Create Nodes
     supervisor_node = create_supervisor_node(llm)
