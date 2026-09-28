@@ -83,7 +83,7 @@ The tests need no API key or network: sockets are blocked and `backend/.env` is 
 
 Frontend: `npm ci && npm run typecheck && npm run build`.
 
-GitHub Actions (`.github/workflows/ci.yml`) runs both on every push and pull request: backend on Python 3.12 with the pinned requirements, frontend on Node 20. pip and npm caches are enabled.
+GitHub Actions (`.github/workflows/ci.yml`) runs both on every push and pull request: backend on Python 3.12 with the pinned requirements, frontend on Node 22. pip and npm caches are enabled.
 
 ## Evaluation
 
