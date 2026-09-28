@@ -9,6 +9,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Annotated
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -18,6 +19,7 @@ from google.genai.errors import APIError as GenAIAPIError
 from langchain_core.exceptions import ModelError
 from langchain_core.runnables import Runnable
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # Load backend/.env before any setting is read.
 load_dotenv()
@@ -40,7 +42,10 @@ configure_logging(get_settings().log_level)
 logger = logging.getLogger("app.api")
 
 # Errors raised by the Gemini client (auth, quota, invalid request, 5xx after its retries).
-LLM_PROVIDER_ERRORS = (ChatGoogleGenerativeAIError, GenAIAPIError, ModelError)
+# Timeouts and connection failures surface as raw httpx exceptions after its retries.
+# The weather tool never lets httpx errors escape (they become ToolErrors), so at this
+# level they come from the LLM client.
+LLM_PROVIDER_ERRORS = (ChatGoogleGenerativeAIError, GenAIAPIError, ModelError, httpx.TransportError)
 
 
 class ApiError(Exception):
@@ -127,6 +132,12 @@ async def _api_error(request: Request, exc: ApiError) -> JSONResponse:
     return _error_response(exc.status_code, exc.code, exc.message)
 
 
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    # 404/405 and friends, in the same envelope as every other error.
+    return _error_response(exc.status_code, "http_error", str(exc.detail))
+
+
 @app.exception_handler(RequestValidationError)
 async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     # Report where and why, without echoing the submitted values back.
@@ -167,9 +178,21 @@ async def plan_trip(
                 initial_state(messages, settings.max_steps),
                 config=run_config(settings.max_steps),
             )
+        response = PlanResponse(
+            request_id=request_id_var.get() or "",
+            response=state["messages"][-1].text,
+            steps=state.get("step_count", 0),
+            finish_reason=state["finish_reason"],
+            trace=[TraceStep.model_validate(event) for event in state.get("trace", [])],
+        )
     except TimeoutError as exc:
         logger.error("plan timed out", extra={"timeout_s": settings.graph_timeout_s})
         raise ApiError(504, "timeout", "Planning took too long. Please try again.") from exc
+    except httpx.TimeoutException as exc:
+        logger.exception("language model timed out")
+        raise ApiError(
+            504, "llm_timeout", "The language model did not respond in time. Please try again."
+        ) from exc
     except LLM_PROVIDER_ERRORS as exc:
         logger.exception("language model error")
         raise ApiError(
@@ -181,21 +204,15 @@ async def plan_trip(
             500, "internal_error", "Something went wrong while planning. Please try again."
         ) from exc
 
-    trace = [TraceStep.model_validate(event) for event in state.get("trace", [])]
     logger.info(
         "plan complete",
         extra={
-            "steps": state.get("step_count", 0),
-            "finish_reason": state.get("finish_reason"),
-            "nodes": [step.node for step in trace],
+            "steps": response.steps,
+            "finish_reason": response.finish_reason,
+            "nodes": [step.node for step in response.trace],
             "latency_ms": round((time.perf_counter() - started) * 1000, 1),
-            "history_turns": len(messages) - 1,
+            "history_turns_received": len(body.history),
+            "messages_sent_to_graph": len(messages),
         },
     )
-    return PlanResponse(
-        request_id=request_id_var.get() or "",
-        response=state["messages"][-1].text,
-        steps=state.get("step_count", 0),
-        finish_reason=state["finish_reason"],
-        trace=trace,
-    )
+    return response

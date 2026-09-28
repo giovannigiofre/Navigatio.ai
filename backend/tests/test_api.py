@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import Iterator
 from dataclasses import replace
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
@@ -151,6 +152,41 @@ def test_llm_provider_errors_map_to_502(use):
     assert response.status_code == 502
     assert response.json()["error"]["code"] == "llm_unavailable"
     assert "AIza" not in response.text
+
+
+def test_llm_timeouts_map_to_504_and_connection_errors_to_502(use):
+    # After its own retries, the Gemini client re-raises raw httpx exceptions.
+    timeout = use(FakeGraph(error=httpx.ReadTimeout("read timed out"))).post(
+        "/plan", json={"message": "Weekend in Lisbon"}
+    )
+    refused = use(FakeGraph(error=httpx.ConnectError("connection refused"))).post(
+        "/plan", json={"message": "Weekend in Lisbon"}
+    )
+
+    assert (timeout.status_code, timeout.json()["error"]["code"]) == (504, "llm_timeout")
+    assert (refused.status_code, refused.json()["error"]["code"]) == (502, "llm_unavailable")
+
+
+def test_malformed_graph_output_is_an_enveloped_500(use):
+    client = use(FakeGraph({"messages": [AIMessage("partial")]}))  # no finish_reason
+
+    response = client.post(
+        "/plan", json={"message": "Weekend in Lisbon"}, headers={"Origin": "http://localhost:3000"}
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "internal_error"
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.headers["X-Request-ID"] == response.json()["error"]["request_id"]
+
+
+def test_unknown_routes_use_the_error_envelope(use):
+    client = use(FakeGraph())
+
+    response = client.get("/nope")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "http_error"
 
 
 def test_graph_run_is_bounded_by_a_timeout(use):

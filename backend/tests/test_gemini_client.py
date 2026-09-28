@@ -87,3 +87,16 @@ async def test_graph_runs_on_the_gemini_client(respx_mock, monkeypatch: pytest.M
     for body in gemini.bodies:
         assert body["contents"][0]["role"] == "user"
         assert body["contents"][-1]["role"] == "user"
+
+
+async def test_gemini_timeouts_surface_as_httpx_timeouts(
+    respx_mock, monkeypatch: pytest.MonkeyPatch
+):
+    """The API maps httpx.TimeoutException to 504; pin down that the client really raises it."""
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key-not-used")
+    respx_mock.post(url__regex=GEMINI_URL).mock(side_effect=httpx.ReadTimeout("read timed out"))
+    llm = ChatGoogleGenerativeAI(model="gemini-3.8-flash", timeout=1, max_retries=1)
+    graph = build_graph(llm, create_trip_weather_tool(StubWeatherProvider()))
+
+    with pytest.raises(httpx.TimeoutException):
+        await graph.ainvoke(initial_state([HumanMessage("Hi")], max_steps=6), config=run_config(6))
