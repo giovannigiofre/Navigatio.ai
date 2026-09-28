@@ -1,39 +1,35 @@
+"""Manual smoke run of the real graph against Gemini (needs GOOGLE_API_KEY).
+
+cd backend && python -m scripts.smoke_graph "Weekend in Lisbon next month, flexible budget"
+"""
+
 import asyncio
-import os
+import sys
+
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
-from app.graph.workflow import create_workflow
 
-# Load environment variables (for GOOGLE_API_KEY)
-load_dotenv()
+from app.config import get_settings
+from app.graph.workflow import create_workflow, initial_state, run_config
 
-async def main():
-    print("Initializing Graph...")
-    try:
-        graph = create_workflow()
-    except Exception as e:
-        print(f"Error initializing graph: {e}")
-        return
+DEFAULT_REQUEST = (
+    "I want to go to Paris for a weekend in May. I like art and good food. Budget is flexible."
+)
 
-    print("Graph Initialized. Running test query...")
-    
-    user_input = "I want to go to Paris for a weekend in May. I like art and good food. Budget is flexible."
-    
-    inputs = {
-        "messages": [HumanMessage(content=user_input)]
-    }
-    
-    print(f"User: {user_input}")
-    print("-" * 50)
-    
-    try:
-        async for output in graph.astream(inputs):
-            for key, value in output.items():
-                print(f"Node '{key}' finished.")
-                print(f"Output: {value}")
-                print("-" * 20)
-    except Exception as e:
-        print(f"Error running graph: {e}")
+
+async def main(user_input: str) -> None:
+    load_dotenv()
+    settings = get_settings()
+    graph = create_workflow(settings)
+    state = initial_state([HumanMessage(content=user_input)], settings.max_steps)
+
+    print(f"User: {user_input}\n" + "-" * 50)
+    async for update in graph.astream(
+        state, config=run_config(settings.max_steps), stream_mode="updates"
+    ):
+        for node, value in update.items():
+            print(f"[{node}] {value}\n" + "-" * 20)
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(" ".join(sys.argv[1:]) or DEFAULT_REQUEST))

@@ -11,3 +11,11 @@ class TripState(TypedDict):
 
     # Routing decision written by the Supervisor and read by its conditional edge.
     next_agent: str
+
+    # Step budget: number of specialist delegations so far, and the maximum allowed.
+    # The Supervisor forces FINISH once step_count reaches max_steps.
+    step_count: int
+    max_steps: int
+
+    # Why the run ended: "supervisor" (chose FINISH), "step_budget" or "router_error".
+    finish_reason: str

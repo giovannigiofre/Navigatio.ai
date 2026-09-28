@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-from app.graph.workflow import create_workflow
+from app.config import get_settings
+from app.graph.workflow import create_workflow, initial_state, run_config
 
 app = FastAPI(title="Navigatio.ai Agent Backend")
 
@@ -42,14 +43,12 @@ async def plan_options():
 @app.post("/plan")
 async def plan_trip(request: PlanRequest):
     try:
-        # Convert input to LangChain messages
-        inputs = {
-            "messages": [HumanMessage(content=request.message)]
-        }
-        
+        max_steps = get_settings().max_steps
+        inputs = initial_state([HumanMessage(content=request.message)], max_steps)
+
         # Run the graph
         # In a real app, we would stream this or use a background task
-        final_state = await graph.ainvoke(inputs)
+        final_state = await graph.ainvoke(inputs, config=run_config(max_steps))
         
         # Extract the final response
         messages = final_state["messages"]

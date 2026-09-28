@@ -1,61 +1,86 @@
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.output_parsers.openai_tools import JsonOutputToolsParser
-from langchain_google_genai import ChatGoogleGenerativeAI
-from typing import List
+import logging
+from typing import Literal, get_args
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import BaseMessage, SystemMessage
+from pydantic import BaseModel, Field
 
 from app.graph.state import TripState
 
-# Define the system prompt for the supervisor
-SYSTEM_PROMPT = """You are the Supervisor of an elite travel concierge team.
-Your goal is to orchestrate the creation of a perfect trip itinerary for the user.
+logger = logging.getLogger(__name__)
 
-You have the following specialists at your disposal:
-1. FlightExpert: Finds the best flights.
-2. HotelScout: Finds accommodation that matches the user's vibe.
-3. ActivityCurator: Finds things to do and places to eat.
+SpecialistName = Literal["FlightExpert", "HotelScout", "ActivityCurator"]
+SPECIALISTS: tuple[str, ...] = get_args(SpecialistName)
+FINISH = "FINISH"
+DEFAULT_MAX_STEPS = 6
 
-Your responsibilities:
-1. Analyze the user's request.
-2. Delegate tasks to the appropriate specialist.
-3. If the plan is complete and satisfies the user's request, respond with "FINISH".
-4. If you need more information from the user, respond with "FINISH" and ask the question in the final message.
+SYSTEM_PROMPT = """You are the supervisor of a trip-planning team. You do not write the plan \
+yourself: you decide which specialist acts next, or FINISH.
 
-Do not do the work yourself. Delegate to the specialists.
-"""
+Specialists:
+- FlightExpert: flight options between the user's origin and destination.
+- HotelScout: where to stay, matched to the user's style and budget.
+- ActivityCurator: things to do and places to eat at the destination.
 
-options = ["FlightExpert", "HotelScout", "ActivityCurator"]
+Rules:
+- Call only the specialists the request actually needs. "Things to do in Lisbon" needs \
+ActivityCurator only.
+- Call each specialist at most once per request unless its report was clearly incomplete.
+- Choose FINISH when the specialists' reports cover the request.
+- Choose FINISH right away when key information is missing (for example no destination, or no \
+dates for flights and hotels): the user will be asked a clarifying question.
 
-# Define the tool for routing
-route_tool = {
-    "name": "route",
-    "description": "Select the next role.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "next": {
-                "type": "string",
-                "enum": options,
-            }
-        },
-        "required": ["next"],
-    },
-}
+Specialist steps used so far: {step_count} of {max_steps}."""
 
-def create_supervisor_node(llm: ChatGoogleGenerativeAI):
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", SYSTEM_PROMPT),
-            MessagesPlaceholder(variable_name="messages"),
-            (
-                "system",
-                "Given the conversation above, who should act next? Or should we FINISH? Select one of: {options}",
-            ),
-        ]
-    ).partial(options=str(options), team_members=", ".join(options))
 
-    return (
-        prompt
-        | llm.bind_tools(tools=[route_tool], tool_choice="route")
-        | JsonOutputToolsParser()
-        | (lambda x: {"next_agent": x[0]["args"]["next"] if x else "FINISH"})
+class RouteDecision(BaseModel):
+    """The supervisor's choice of what happens next."""
+
+    next: Literal[SpecialistName, "FINISH"] = Field(
+        description="The specialist that should act next, or FINISH to end the run."
     )
+    reason: str = Field(description="One short sentence explaining the choice.")
+
+
+def _router_input(state: TripState, step_count: int, max_steps: int) -> list[BaseMessage]:
+    prompt = SYSTEM_PROMPT.format(step_count=step_count, max_steps=max_steps)
+    return [SystemMessage(content=prompt), *state["messages"]]
+
+
+def create_supervisor_node(llm: BaseChatModel):
+    router = llm.with_structured_output(RouteDecision, include_raw=True)
+
+    async def supervisor(state: TripState) -> dict:
+        step_count = state.get("step_count", 0)
+        max_steps = state.get("max_steps", DEFAULT_MAX_STEPS)
+
+        if step_count >= max_steps:
+            logger.warning(
+                "step budget exhausted, forcing FINISH",
+                extra={"step_count": step_count, "max_steps": max_steps},
+            )
+            return {"next_agent": FINISH, "finish_reason": "step_budget"}
+
+        result = await router.ainvoke(_router_input(state, step_count, max_steps))
+        decision: RouteDecision | None = result["parsed"]
+        if decision is None:
+            logger.error(
+                "supervisor returned no valid route, forcing FINISH",
+                extra={"parsing_error": repr(result["parsing_error"])},
+            )
+            return {"next_agent": FINISH, "finish_reason": "router_error"}
+
+        logger.info(
+            "route decision",
+            extra={
+                "next": decision.next,
+                "reason": decision.reason,
+                "step_count": step_count,
+                "max_steps": max_steps,
+            },
+        )
+        if decision.next == FINISH:
+            return {"next_agent": FINISH, "finish_reason": "supervisor"}
+        return {"next_agent": decision.next, "step_count": step_count + 1}
+
+    return supervisor
