@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { SendHorizontal, Sparkles, Command } from 'lucide-react';
 import { ChatMessage } from './components/ChatMessage';
-import { VisualizationPanel } from './components/VisualizationPanel';
-import { ChatTurn, Message, Sender, TripPlan } from './types';
+import { RunPanel } from './components/RunPanel';
+import { ChatTurn, Message, Sender } from './types';
 import { sendMessageToAgent } from './services/api';
 
 // Initial greeting message (UI only: not sent to the backend as history)
@@ -29,11 +29,10 @@ const toHistory = (messages: Message[]): ChatTurn[] =>
 const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState('');
-  // The backend does not return a structured itinerary yet, so this stays empty.
-  const [currentPlan] = useState<TripPlan | null>(null);
   const [isTyping, setIsTyping] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const latestRun = [...messages].reverse().find(m => m.run)?.run ?? null;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -171,7 +170,7 @@ const App: React.FC = () => {
         </div>
         <div className="z-10 h-full p-4">
           <div className="h-full rounded-2xl overflow-hidden shadow-xl border border-slate-200/60 bg-white">
-            <VisualizationPanel plan={currentPlan} isLoading={isTyping && !currentPlan} />
+            <RunPanel run={latestRun} isRunning={isTyping} />
           </div>
         </div>
       </div>
