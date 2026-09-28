@@ -57,6 +57,12 @@ async def run_weather_tool(tool: BaseTool, call: ToolCall) -> TripWeatherResult:
     return message.artifact
 
 
+def _trace_entry(tool: BaseTool, result: TripWeatherResult) -> dict:
+    if isinstance(result, ToolError):
+        return {"tool": tool.name, "status": "error", "error_kind": result.kind}
+    return {"tool": tool.name, "status": "ok", "days": len(result.days)}
+
+
 def create_weather_advisor_node(
     llm: BaseChatModel, weather_tool: BaseTool, today: Callable[[], date] = date.today
 ):
@@ -78,6 +84,7 @@ def create_weather_advisor_node(
             return {"messages": [AIMessage(content=text, name=NAME)]}
 
         results = [await run_weather_tool(weather_tool, call) for call in calls]
+        trace_detail = {"tool_calls": [_trace_entry(weather_tool, r) for r in results]}
         errors = [r for r in results if isinstance(r, ToolError)]
         if len(errors) == len(results):
             reasons = " ".join(error.message for error in errors)
@@ -85,6 +92,7 @@ def create_weather_advisor_node(
             return {
                 "messages": [AIMessage(content=text, name=NAME)],
                 "sources": [UNAVAILABLE_SOURCE_NOTE],
+                "trace_detail": trace_detail,
             }
 
         data = "\n".join(result.model_dump_json() for result in results)
@@ -92,6 +100,7 @@ def create_weather_advisor_node(
         return {
             "messages": [AIMessage(content=summary.text, name=NAME)],
             "sources": [LIVE_SOURCE_NOTE],
+            "trace_detail": trace_detail,
         }
 
     return weather_advisor

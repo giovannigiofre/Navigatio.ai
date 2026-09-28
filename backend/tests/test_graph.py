@@ -54,6 +54,31 @@ async def test_routes_to_the_chosen_specialist_then_finishes():
     assert "2026-09-28" in llm.calls[1].system_prompt
 
 
+async def test_trace_records_each_node_in_order_with_decisions():
+    llm = ScriptedChatModel(
+        script=[
+            route("ActivityCurator", reason="user wants things to do"),
+            reply("Visit Alfama."),
+            route(FINISH, reason="done"),
+            reply("Plan."),
+        ]
+    )
+
+    state = await run(llm, [HumanMessage("Things to do in Lisbon")])
+
+    trace = state["trace"]
+    assert [event["node"] for event in trace] == [
+        "Supervisor",
+        "ActivityCurator",
+        "Supervisor",
+        "Finalize",
+    ]
+    assert trace[0]["decision"] == "ActivityCurator"
+    assert trace[0]["reason"] == "user wants things to do"
+    assert trace[2]["decision"] == FINISH
+    assert all(event["latency_ms"] >= 0 for event in trace)
+
+
 async def test_step_budget_forces_termination():
     def always_hotels(call: Call) -> AIMessage:
         return route("HotelScout") if call.is_route else reply("Another hotel.")
@@ -68,6 +93,12 @@ async def test_step_budget_forces_termination():
     # The 4th supervisor turn is short-circuited by the budget and never calls the model.
     assert len(llm.route_calls()) == 3
     assert "ran out of steps" in llm.calls[-1].system_prompt
+    assert state["trace"][-2] == {
+        "node": "Supervisor",
+        "latency_ms": state["trace"][-2]["latency_ms"],
+        "decision": FINISH,
+        "reason": "step budget exhausted",
+    }
 
 
 async def test_invalid_route_output_ends_the_run():

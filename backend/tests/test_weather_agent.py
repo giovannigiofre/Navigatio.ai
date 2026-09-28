@@ -62,6 +62,8 @@ async def test_forecast_is_fetched_summarised_and_used_by_activities():
     # ActivityCurator gets the weather report to choose indoor vs outdoor plans.
     assert "### WeatherAdvisor" in llm.calls[4].system_prompt
     assert f"- {LIVE_SOURCE_NOTE}" in state["messages"][-1].content
+    weather_event = next(e for e in state["trace"] if e["node"] == "WeatherAdvisor")
+    assert weather_event["tool_calls"] == [{"tool": TOOL_NAME, "status": "ok", "days": 1}]
 
 
 async def test_tool_failure_is_reported_without_asking_the_model_about_weather():
@@ -87,6 +89,10 @@ async def test_tool_failure_is_reported_without_asking_the_model_about_weather()
     assert len(llm.calls) == 4  # no summary call after the failed tool call
     assert f"- {UNAVAILABLE_SOURCE_NOTE}" in state["messages"][-1].content
     assert LIVE_SOURCE_NOTE not in state["messages"][-1].content
+    weather_event = next(e for e in state["trace"] if e["node"] == "WeatherAdvisor")
+    assert weather_event["tool_calls"] == [
+        {"tool": TOOL_NAME, "status": "error", "error_kind": "upstream_unavailable"}
+    ]
 
 
 async def test_invalid_tool_arguments_become_a_structured_error():

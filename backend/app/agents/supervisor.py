@@ -72,7 +72,11 @@ def create_supervisor_node(llm: BaseChatModel, today: Callable[[], date] = date.
                 "step budget exhausted, forcing FINISH",
                 extra={"step_count": step_count, "max_steps": max_steps},
             )
-            return {"next_agent": FINISH, "finish_reason": "step_budget"}
+            return {
+                "next_agent": FINISH,
+                "finish_reason": "step_budget",
+                "trace_detail": {"decision": FINISH, "reason": "step budget exhausted"},
+            }
 
         result = await router.ainvoke(_router_input(state, step_count, max_steps, today()))
         decision: RouteDecision | None = result["parsed"]
@@ -81,7 +85,11 @@ def create_supervisor_node(llm: BaseChatModel, today: Callable[[], date] = date.
                 "supervisor returned no valid route, forcing FINISH",
                 extra={"parsing_error": repr(result["parsing_error"])},
             )
-            return {"next_agent": FINISH, "finish_reason": "router_error"}
+            return {
+                "next_agent": FINISH,
+                "finish_reason": "router_error",
+                "trace_detail": {"decision": FINISH, "reason": "invalid routing output"},
+            }
 
         logger.info(
             "route decision",
@@ -92,8 +100,17 @@ def create_supervisor_node(llm: BaseChatModel, today: Callable[[], date] = date.
                 "max_steps": max_steps,
             },
         )
+        trace_detail = {"decision": decision.next, "reason": decision.reason}
         if decision.next == FINISH:
-            return {"next_agent": FINISH, "finish_reason": "supervisor"}
-        return {"next_agent": decision.next, "step_count": step_count + 1}
+            return {
+                "next_agent": FINISH,
+                "finish_reason": "supervisor",
+                "trace_detail": trace_detail,
+            }
+        return {
+            "next_agent": decision.next,
+            "step_count": step_count + 1,
+            "trace_detail": trace_detail,
+        }
 
     return supervisor

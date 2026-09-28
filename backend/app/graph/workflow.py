@@ -1,4 +1,6 @@
-from collections.abc import Callable, Sequence
+import logging
+import time
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import date
 
 import httpx
@@ -20,6 +22,40 @@ from app.config import Settings, get_settings
 from app.graph.state import TripState
 from app.tools.trip_weather import build_trip_weather_service, create_trip_weather_tool
 
+logger = logging.getLogger(__name__)
+
+Node = Callable[[TripState], Awaitable[dict]]
+
+
+def traced(name: str, node: Node) -> Node:
+    """Time a node, log it, and append a TraceEvent built from its optional `trace_detail`."""
+
+    async def wrapper(state: TripState) -> dict:
+        started = time.perf_counter()
+        try:
+            update = await node(state)
+        except Exception as exc:
+            latency_ms = round((time.perf_counter() - started) * 1000, 1)
+            logger.warning(
+                "node failed",
+                extra={"node": name, "latency_ms": latency_ms, "error": type(exc).__name__},
+            )
+            raise
+        latency_ms = round((time.perf_counter() - started) * 1000, 1)
+        detail = update.pop("trace_detail", {})
+        logger.info(
+            "node complete",
+            extra={
+                "node": name,
+                "latency_ms": latency_ms,
+                "step_count": update.get("step_count", state.get("step_count", 0)),
+                **detail,
+            },
+        )
+        return {**update, "trace": [{"node": name, "latency_ms": latency_ms, **detail}]}
+
+    return wrapper
+
 
 def route_from_supervisor(state: TripState) -> str:
     next_agent = state.get("next_agent", FINISH)
@@ -35,11 +71,11 @@ def build_graph(
         WEATHER_ADVISOR: create_weather_advisor_node(llm, weather_tool, today),
     }
     workflow = StateGraph(TripState)
-    workflow.add_node("Supervisor", create_supervisor_node(llm, today))
+    workflow.add_node("Supervisor", traced("Supervisor", create_supervisor_node(llm, today)))
     for name, node in specialists.items():
-        workflow.add_node(name, node)
+        workflow.add_node(name, traced(name, node))
         workflow.add_edge(name, "Supervisor")
-    workflow.add_node("Finalize", create_finalizer_node(llm))
+    workflow.add_node("Finalize", traced("Finalize", create_finalizer_node(llm)))
 
     workflow.add_edge(START, "Supervisor")
     workflow.add_conditional_edges(
