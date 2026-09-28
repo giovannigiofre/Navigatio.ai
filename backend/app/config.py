@@ -14,6 +14,16 @@ DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 DEFAULT_HTTP_USER_AGENT = "Navigatio.ai/0.1 (+https://github.com/giovannigiofre/Navigatio.ai)"
 
 
+DEFAULT_ALLOWED_ORIGINS = ("http://localhost:3000", "http://127.0.0.1:3000")
+
+
+def _list_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
+
+
 def _int_env(name: str, default: int, *, minimum: int = 1) -> int:
     raw = os.getenv(name)
     if raw is None or raw.strip() == "":
@@ -32,6 +42,8 @@ class Settings:
     # Sent with every external API call.
     http_user_agent: str = DEFAULT_HTTP_USER_AGENT
     log_level: str = "INFO"
+    # Browser origins allowed to call the API (CORS).
+    allowed_origins: tuple[str, ...] = DEFAULT_ALLOWED_ORIGINS
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -40,6 +52,7 @@ class Settings:
             max_steps=_int_env("MAX_STEPS", 6),
             http_user_agent=os.getenv("HTTP_USER_AGENT") or DEFAULT_HTTP_USER_AGENT,
             log_level=os.getenv("LOG_LEVEL", "INFO"),
+            allowed_origins=_list_env("ALLOWED_ORIGINS", DEFAULT_ALLOWED_ORIGINS),
         )
 
 

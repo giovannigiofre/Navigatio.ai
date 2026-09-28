@@ -49,20 +49,15 @@ async def request_context(request: Request, call_next):
         request_id_var.reset(token)
 
 
-# Configure CORS - must be added before routes
+# Added last, so it is the outermost middleware and also answers preflight requests.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://192.168.1.199:3000",  # Network access
-    ],
-    allow_credentials=False,  # Set to False to avoid CORS issues with credentials
+    allow_origins=list(get_settings().allowed_origins),
+    allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Accept"],
-    max_age=3600,  # Cache preflight responses for 1 hour
+    allow_headers=["Content-Type", "Accept", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
+    max_age=3600,
 )
 
 # Initialize the graph
@@ -73,11 +68,6 @@ graph = create_workflow(http_client)
 class PlanRequest(BaseModel):
     message: str
     history: list[dict] | None = []
-
-
-@app.options("/plan")
-async def plan_options():
-    return {"status": "ok"}
 
 
 @app.post("/plan")
