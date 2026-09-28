@@ -1,0 +1,14 @@
+{"id": "weekend-city-trip", "message": "Plan a weekend in Lisbon next weekend, flying from Basel. Budget is flexible.", "expected": ["FlightExpert", "HotelScout", "WeatherAdvisor", "ActivityCurator"]}
+{"id": "activities-only", "message": "Just find me things to do in Lisbon.", "expected": ["ActivityCurator"]}
+{"id": "vague-no-destination", "message": "I want to go somewhere nice.", "expected": [], "note": "Should FINISH and ask a clarifying question."}
+{"id": "cheap-trip-no-dates", "message": "Plan a cheap trip to Prague.", "expected": [], "note": "No dates for flights/hotels: should FINISH and ask."}
+{"id": "flights-only", "message": "Find me flights from Zurich to Barcelona on the 14th of next month, returning five days later.", "expected": ["FlightExpert"]}
+{"id": "hotels-only", "message": "Where should I stay in Kyoto for four nights, three months from now? Mid-range budget, close to public transport.", "expected": ["HotelScout"]}
+{"id": "weather-only", "message": "What will the weather be like in Rome this coming weekend?", "expected": ["WeatherAdvisor"]}
+{"id": "weather-dependent-activities", "message": "I'm in Copenhagen tomorrow and the day after. What should I do, depending on the weather?", "expected": ["WeatherAdvisor", "ActivityCurator"]}
+{"id": "far-future-full-trip", "message": "Plan a 10-day trip to Japan next spring from Milan: flights, hotels and things to do.", "expected": ["FlightExpert", "HotelScout", "ActivityCurator"], "note": "Dates are beyond the 16-day forecast window, so no WeatherAdvisor."}
+{"id": "driving-hotel-and-activities", "message": "I'm driving to Lake Como next weekend. Suggest a hotel and some things to do.", "expected": ["HotelScout", "WeatherAdvisor", "ActivityCurator"], "note": "No flights: the user is driving."}
+{"id": "clarified-city-break", "history": [{"role": "user", "content": "I'd like a city break."}, {"role": "assistant", "content": "Sure! Where would you like to go, and when?"}], "message": "Vienna, next Friday to Sunday, flying from Basel.", "expected": ["FlightExpert", "HotelScout", "WeatherAdvisor", "ActivityCurator"]}
+{"id": "follow-up-restaurants", "history": [{"role": "user", "content": "Plan a weekend in Paris next weekend, I'm taking the train from Basel."}, {"role": "assistant", "content": "Here is your Paris weekend: stay in Le Marais, visit the Louvre on Saturday and the Musée d'Orsay on Sunday."}], "message": "Can you suggest some restaurants instead of museums?", "expected": ["ActivityCurator"]}
+{"id": "out-of-scope", "message": "What is the capital of Australia?", "expected": [], "note": "Not a trip request: should FINISH without specialists."}
+{"id": "hot-day-activities", "message": "What can I do in Seville this Saturday? I don't cope well with heat.", "expected": ["WeatherAdvisor", "ActivityCurator"]}
