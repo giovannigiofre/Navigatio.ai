@@ -32,13 +32,16 @@ app.add_middleware(
 # Initialize the graph
 graph = create_workflow()
 
+
 class PlanRequest(BaseModel):
     message: str
     history: Optional[List[Dict[str, Any]]] = []
 
+
 @app.options("/plan")
 async def plan_options():
     return {"status": "ok"}
+
 
 @app.post("/plan")
 async def plan_trip(request: PlanRequest):
@@ -49,17 +52,15 @@ async def plan_trip(request: PlanRequest):
         # Run the graph
         # In a real app, we would stream this or use a background task
         final_state = await graph.ainvoke(inputs, config=run_config(max_steps))
-        
+
         # Extract the final response
         messages = final_state["messages"]
         last_message = messages[-1].content
-        
-        return {
-            "response": last_message,
-            "trace": [m.content for m in messages]
-        }
+
+        return {"response": last_message, "trace": [m.content for m in messages]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/health")
 async def health():

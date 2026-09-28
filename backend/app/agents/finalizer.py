@@ -1,0 +1,37 @@
+"""The supervisor's last step: turn the specialists' reports into one answer."""
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage
+
+from app.agents.common import build_llm_input, specialist_reports
+from app.graph.state import TripState
+
+FINAL_PROMPT = """You are the lead planner of a trip-planning team. Write the reply to the \
+user from the specialists' reports.
+- Consolidate the reports into one coherent plan (by topic, or by day if dates are known) and \
+remove repetition.
+- Use only facts from the reports. Do not add flights, hotels, prices or weather they do not \
+contain.
+- If there are no reports, key details are missing: ask one short clarifying question about \
+what is needed (for example destination, dates, departure city or budget).
+Format: plain text, short section titles on their own line, '-' bullets. No Markdown headings, \
+bold or tables."""
+
+BUDGET_NOTE = """
+The team ran out of steps before finishing. Say briefly which parts of the request are not \
+covered yet."""
+
+
+def create_finalizer_node(llm: BaseChatModel):
+    async def finalize(state: TripState) -> dict:
+        messages = state["messages"]
+        prompt = FINAL_PROMPT
+        if state.get("finish_reason") == "step_budget":
+            prompt += BUDGET_NOTE
+        if not specialist_reports(messages):
+            prompt += "\n\nNo specialist was consulted for this request."
+
+        response = await llm.ainvoke(build_llm_input(prompt, messages))
+        return {"messages": [AIMessage(content=response.text)]}
+
+    return finalize

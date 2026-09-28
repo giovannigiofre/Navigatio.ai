@@ -1,17 +1,15 @@
 import logging
-from typing import Literal, get_args
+from typing import Literal
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
 
+from app.agents.common import FINISH, SpecialistName, build_llm_input, specialist_reports
 from app.graph.state import TripState
 
 logger = logging.getLogger(__name__)
 
-SpecialistName = Literal["FlightExpert", "HotelScout", "ActivityCurator"]
-SPECIALISTS: tuple[str, ...] = get_args(SpecialistName)
-FINISH = "FINISH"
 DEFAULT_MAX_STEPS = 6
 
 SYSTEM_PROMPT = """You are the supervisor of a trip-planning team. You do not write the plan \
@@ -30,7 +28,8 @@ ActivityCurator only.
 - Choose FINISH right away when key information is missing (for example no destination, or no \
 dates for flights and hotels): the user will be asked a clarifying question.
 
-Specialist steps used so far: {step_count} of {max_steps}."""
+Specialist steps used so far: {step_count} of {max_steps}.
+Already consulted for this request: {consulted}."""
 
 
 class RouteDecision(BaseModel):
@@ -43,8 +42,13 @@ class RouteDecision(BaseModel):
 
 
 def _router_input(state: TripState, step_count: int, max_steps: int) -> list[BaseMessage]:
-    prompt = SYSTEM_PROMPT.format(step_count=step_count, max_steps=max_steps)
-    return [SystemMessage(content=prompt), *state["messages"]]
+    consulted = [m.name for m in specialist_reports(state["messages"])]
+    prompt = SYSTEM_PROMPT.format(
+        step_count=step_count,
+        max_steps=max_steps,
+        consulted=", ".join(consulted) if consulted else "none",
+    )
+    return build_llm_input(prompt, state["messages"])
 
 
 def create_supervisor_node(llm: BaseChatModel):

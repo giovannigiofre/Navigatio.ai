@@ -1,4 +1,5 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from datetime import date
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
@@ -7,8 +8,10 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from app.agents.common import FINISH, SPECIALISTS
+from app.agents.finalizer import create_finalizer_node
 from app.agents.specialists import get_specialists
-from app.agents.supervisor import FINISH, SPECIALISTS, create_supervisor_node
+from app.agents.supervisor import create_supervisor_node
 from app.config import Settings, get_settings
 from app.graph.state import TripState
 
@@ -18,20 +21,22 @@ def route_from_supervisor(state: TripState) -> str:
     return next_agent if next_agent in SPECIALISTS else FINISH
 
 
-def build_graph(llm: BaseChatModel) -> CompiledStateGraph:
-    """Supervisor/worker graph: Supervisor -> specialist -> Supervisor ... -> END."""
+def build_graph(llm: BaseChatModel, today: Callable[[], date] = date.today) -> CompiledStateGraph:
+    """Supervisor -> specialist -> Supervisor ... -> Finalize -> END."""
     workflow = StateGraph(TripState)
     workflow.add_node("Supervisor", create_supervisor_node(llm))
-    for name, node in get_specialists(llm).items():
+    for name, node in get_specialists(llm, today).items():
         workflow.add_node(name, node)
         workflow.add_edge(name, "Supervisor")
+    workflow.add_node("Finalize", create_finalizer_node(llm))
 
     workflow.add_edge(START, "Supervisor")
     workflow.add_conditional_edges(
         "Supervisor",
         route_from_supervisor,
-        {**{name: name for name in SPECIALISTS}, FINISH: END},
+        {**{name: name for name in SPECIALISTS}, FINISH: "Finalize"},
     )
+    workflow.add_edge("Finalize", END)
     return workflow.compile()
 
 
@@ -44,7 +49,7 @@ def create_workflow(settings: Settings | None = None) -> CompiledStateGraph:
 def recursion_limit_for(max_steps: int) -> int:
     """LangGraph super-step limit matching a step budget, as a second safety net.
 
-    One run is Supervisor + max_steps x (specialist + Supervisor), plus headroom.
+    One run is Supervisor + max_steps x (specialist + Supervisor) + Finalize, plus headroom.
     """
     return 2 * max_steps + 4
 
