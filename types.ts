@@ -39,10 +39,35 @@ export interface TripPlan {
   itinerary: DayPlan[];
 }
 
-export interface AgentAction {
+// One turn of conversation history, as sent to the backend.
+export interface ChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ToolCallTrace {
   tool: string;
-  status: 'running' | 'completed' | 'failed';
-  message: string;
+  status: 'ok' | 'error';
+  error_kind?: string;
+  days?: number;
+}
+
+// One node execution in the backend graph, as returned in the /plan trace.
+export interface TraceStep {
+  node: string;
+  latency_ms: number;
+  decision?: string;
+  reason?: string;
+  tool_calls?: ToolCallTrace[];
+}
+
+export type FinishReason = 'supervisor' | 'step_budget' | 'router_error';
+
+export interface AgentRun {
+  requestId: string;
+  steps: number;
+  finishReason: FinishReason;
+  trace: TraceStep[];
 }
 
 export interface Message {
@@ -50,7 +75,7 @@ export interface Message {
   sender: Sender;
   content: string;
   timestamp: Date;
-  agentActions?: AgentAction[]; // Trace what the agent is doing (e.g. "Checking flights...")
+  run?: AgentRun; // How the backend produced this reply
 }
 
 export interface ChatState {

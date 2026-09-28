@@ -2,25 +2,29 @@ import React, { useState, useRef, useEffect } from 'react';
 import { SendHorizontal, Sparkles, Command } from 'lucide-react';
 import { ChatMessage } from './components/ChatMessage';
 import { VisualizationPanel } from './components/VisualizationPanel';
-import { Message, Sender, TripPlan, AgentAction } from './types';
+import { ChatTurn, Message, Sender, TripPlan } from './types';
 import { sendMessageToAgent } from './services/api';
 
-// Initial greeting message
+// Initial greeting message (UI only: not sent to the backend as history)
 const INITIAL_MESSAGE: Message = {
   id: 'init-1',
   sender: Sender.AI,
-  content: "Hello! I'm your AI travel agent. Where would you like to go on your next adventure? I can check flight prices, hotels, and build a full itinerary for you.",
+  content: "Hello! Where and when would you like to travel? I can check the live weather forecast for trips in the next 16 days, suggest things to do, and sketch illustrative flight and hotel options.",
   timestamp: new Date()
 };
+
+// Earlier user/assistant turns, oldest first, for multi-turn context on the backend.
+const toHistory = (messages: Message[]): ChatTurn[] =>
+  messages
+    .filter(m => m.id !== INITIAL_MESSAGE.id && m.sender !== Sender.System)
+    .map(m => ({ role: m.sender === Sender.User ? 'user' : 'assistant', content: m.content }));
 
 const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState('');
-  const [currentPlan, setCurrentPlan] = useState<TripPlan | null>(null);
+  // The backend does not return a structured itinerary yet, so this stays empty.
+  const [currentPlan] = useState<TripPlan | null>(null);
   const [isTyping, setIsTyping] = useState(false);
-
-  // Track current agent actions for the active "Thinking" state
-  const [activeAgentActions, setActiveAgentActions] = useState<AgentAction[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -30,7 +34,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, activeAgentActions]);
+  }, [messages, isTyping]);
 
   const handleSendMessage = async () => {
     if (!input.trim() || isTyping) return;
@@ -42,53 +46,35 @@ const App: React.FC = () => {
       timestamp: new Date()
     };
 
+    const history = toHistory(messages);
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsTyping(true);
-    setActiveAgentActions([]);
 
     try {
-      // Real Agent Process
-      const response = await sendMessageToAgent(
-        userMsg.content,
-        currentPlan,
-        (action) => {
-          // Update the temporary actions state to show live progress
-          setActiveAgentActions(prev => {
-            const existing = prev.find(a => a.tool === action.tool);
-            if (existing) {
-              return prev.map(a => a.tool === action.tool ? action : a);
-            }
-            return [...prev, action];
-          });
-        }
-      );
+      const reply = await sendMessageToAgent(userMsg.content, history);
 
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: Sender.AI,
-        content: response.text,
+        content: reply.text,
         timestamp: new Date(),
-        agentActions: activeAgentActions // Attach the final log of actions
+        run: reply.run
       };
-
-      if (response.updatedPlan) {
-        setCurrentPlan(response.updatedPlan);
-      }
 
       setMessages(prev => [...prev, aiMsg]);
     } catch (error) {
       console.error("Agent Error:", error);
+      const reason = error instanceof Error ? error.message : 'Unknown error.';
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: Sender.System,
-        content: "Sorry, I encountered an error while connecting to the travel network.",
+        content: `Sorry, the request failed: ${reason}`,
         timestamp: new Date()
       };
       setMessages(prev => [...prev, errorMsg]);
     } finally {
       setIsTyping(false);
-      setActiveAgentActions([]);
     }
   };
 
@@ -122,17 +108,13 @@ const App: React.FC = () => {
             <ChatMessage key={msg.id} message={msg} />
           ))}
 
-          {/* Active Thinking Indicator */}
-          {isTyping && activeAgentActions.length > 0 && (
+          {/* Pending indicator: the backend answers once the whole run is done (no streaming) */}
+          {isTyping && (
             <div className="flex w-full mb-6 justify-start">
               <div className="flex flex-col gap-2 max-w-[85%] ml-11">
-                <div className="bg-white border border-brand-100 rounded-lg p-3 text-xs text-slate-600 shadow-sm animate-pulse">
-                  {activeAgentActions.map((action, idx) => (
-                    <div key={idx} className="flex items-center gap-2 mb-1 last:mb-0">
-                      <div className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-bounce"></div>
-                      <span>{action.message}</span>
-                    </div>
-                  ))}
+                <div className="bg-white border border-brand-100 rounded-lg p-3 text-xs text-slate-600 shadow-sm animate-pulse flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-bounce"></div>
+                  <span>The agents are working on it. This can take up to a minute.</span>
                 </div>
               </div>
             </div>
@@ -167,7 +149,7 @@ const App: React.FC = () => {
           </div>
           <div className="mt-2 text-center">
             <p className="text-[10px] text-slate-400 flex items-center justify-center gap-1">
-              <Command size={10} /> AI Agent accesses real-time pricing & maps
+              <Command size={10} /> Weather: live Open-Meteo forecast. Flights and hotels: illustrative, not live prices.
             </p>
           </div>
         </div>
