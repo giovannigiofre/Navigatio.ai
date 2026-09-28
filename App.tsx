@@ -13,10 +13,17 @@ const INITIAL_MESSAGE: Message = {
   timestamp: new Date()
 };
 
-// Earlier user/assistant turns, oldest first, for multi-turn context on the backend.
+// Must match the backend's limits (MAX_HISTORY_TURNS default, PlanRequest.message).
+const MAX_HISTORY_TURNS = 20;
+const MAX_MESSAGE_CHARS = 4000;
+
+// Most recent user/assistant turns, oldest first, for multi-turn context on the backend.
+// Failed requests, error notices and the UI greeting are left out.
 const toHistory = (messages: Message[]): ChatTurn[] =>
   messages
     .filter(m => m.id !== INITIAL_MESSAGE.id && m.sender !== Sender.System)
+    .filter(m => !m.failed && m.content.trim() !== '')
+    .slice(-MAX_HISTORY_TURNS)
     .map(m => ({ role: m.sender === Sender.User ? 'user' : 'assistant', content: m.content }));
 
 const App: React.FC = () => {
@@ -66,6 +73,7 @@ const App: React.FC = () => {
     } catch (error) {
       console.error("Agent Error:", error);
       const reason = error instanceof Error ? error.message : 'Unknown error.';
+      setMessages(prev => prev.map(m => (m.id === userMsg.id ? { ...m, failed: true } : m)));
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: Sender.System,
@@ -114,7 +122,7 @@ const App: React.FC = () => {
               <div className="flex flex-col gap-2 max-w-[85%] ml-11">
                 <div className="bg-white border border-brand-100 rounded-lg p-3 text-xs text-slate-600 shadow-sm animate-pulse flex items-center gap-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-bounce"></div>
-                  <span>The agents are working on it. This can take up to a minute.</span>
+                  <span>The agents are working on it. This can take up to 90 seconds.</span>
                 </div>
               </div>
             </div>
@@ -130,6 +138,7 @@ const App: React.FC = () => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
+              maxLength={MAX_MESSAGE_CHARS}
               placeholder="Describe your ideal trip..."
               className="w-full bg-transparent border-none focus:ring-0 resize-none max-h-32 min-h-[44px] py-2.5 px-3 text-sm text-slate-800 placeholder:text-slate-400"
               rows={1}

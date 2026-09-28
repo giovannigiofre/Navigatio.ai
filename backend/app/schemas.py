@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 MAX_MESSAGE_CHARS = 4_000
 MAX_TURN_CHARS = 16_000
-MAX_HISTORY_ITEMS = 200
+MAX_HISTORY_ITEMS = 50
 
 
 class ChatTurn(BaseModel):

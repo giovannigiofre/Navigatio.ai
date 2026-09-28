@@ -76,6 +76,7 @@ export interface Message {
   content: string;
   timestamp: Date;
   run?: AgentRun; // How the backend produced this reply
+  failed?: boolean; // A user message whose request failed: not sent as history
 }
 
 export interface ChatState {
