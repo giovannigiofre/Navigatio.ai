@@ -24,6 +24,8 @@ from app.tools.trip_weather import build_trip_weather_service, create_trip_weath
 
 logger = logging.getLogger(__name__)
 
+LLM_MAX_ATTEMPTS = 2
+
 Node = Callable[[TripState], Awaitable[dict]]
 
 
@@ -95,7 +97,12 @@ def create_workflow(
     `http` is the shared client for the weather tool; its owner closes it.
     """
     settings = settings or get_settings()
-    llm = ChatGoogleGenerativeAI(model=settings.gemini_model)
+    llm = ChatGoogleGenerativeAI(
+        model=settings.gemini_model,
+        timeout=settings.llm_timeout_s,
+        # google-genai treats this as total attempts; it retries 408/429/5xx with backoff.
+        max_retries=LLM_MAX_ATTEMPTS,
+    )
     weather_tool = create_trip_weather_tool(build_trip_weather_service(http))
     return build_graph(llm, weather_tool)
 

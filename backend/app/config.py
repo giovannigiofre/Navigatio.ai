@@ -24,6 +24,16 @@ def _list_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
+def _float_env(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    value = float(raw)
+    if value <= 0:
+        raise ValueError(f"{name} must be > 0, got {value}")
+    return value
+
+
 def _int_env(name: str, default: int, *, minimum: int = 1) -> int:
     raw = os.getenv(name)
     if raw is None or raw.strip() == "":
@@ -41,6 +51,9 @@ class Settings:
     max_steps: int = 6
     # Earlier chat turns passed to the graph with each request (older ones are dropped).
     max_history_turns: int = 20
+    # Wall-clock budget for one /plan graph run, and for each individual LLM call.
+    graph_timeout_s: float = 90.0
+    llm_timeout_s: float = 30.0
     # Sent with every external API call.
     http_user_agent: str = DEFAULT_HTTP_USER_AGENT
     log_level: str = "INFO"
@@ -53,6 +66,8 @@ class Settings:
             gemini_model=os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
             max_steps=_int_env("MAX_STEPS", 6),
             max_history_turns=_int_env("MAX_HISTORY_TURNS", 20, minimum=0),
+            graph_timeout_s=_float_env("GRAPH_TIMEOUT_S", 90.0),
+            llm_timeout_s=_float_env("LLM_TIMEOUT_S", 30.0),
             http_user_agent=os.getenv("HTTP_USER_AGENT") or DEFAULT_HTTP_USER_AGENT,
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             allowed_origins=_list_env("ALLOWED_ORIGINS", DEFAULT_ALLOWED_ORIGINS),
