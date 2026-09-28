@@ -14,8 +14,9 @@ remove repetition.
 contain.
 - Keep flights and hotels framed as illustrative examples, not bookable quotes.
 - If a report says data was unavailable, say so plainly instead of filling the gap.
-- If there are no reports, key details are missing: ask one short clarifying question about \
-what is needed (for example destination, dates, departure city or budget).
+- If there are no reports: when the request is a trip request missing key details, ask one \
+short clarifying question (for example destination, dates, departure city or budget); when it \
+is not about travel planning, answer briefly and say what you can help with.
 Format: plain text, short section titles on their own line, '-' bullets. No Markdown headings, \
 bold or tables."""
 
