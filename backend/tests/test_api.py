@@ -8,8 +8,10 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 
+from app import main
 from app.config import Settings, get_settings
 from app.main import app, get_graph
+from app.tools.http import create_http_client as real_create_http_client
 
 SETTINGS = Settings(max_steps=4, max_history_turns=2, graph_timeout_s=5.0)
 
@@ -169,14 +171,15 @@ def test_llm_timeouts_map_to_504_and_connection_errors_to_502(use):
 
 def test_malformed_graph_output_is_an_enveloped_500(use):
     client = use(FakeGraph({"messages": [AIMessage("partial")]}))  # no finish_reason
+    origin = get_settings().allowed_origins[0]
 
     response = client.post(
-        "/plan", json={"message": "Weekend in Lisbon"}, headers={"Origin": "http://localhost:3000"}
+        "/plan", json={"message": "Weekend in Lisbon"}, headers={"Origin": origin}
     )
 
     assert response.status_code == 500
     assert response.json()["error"]["code"] == "internal_error"
-    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.headers["access-control-allow-origin"] == origin
     assert response.headers["X-Request-ID"] == response.json()["error"]["request_id"]
 
 
@@ -200,17 +203,18 @@ def test_graph_run_is_bounded_by_a_timeout(use):
 
 def test_cors_preflight_allows_the_configured_origin(use):
     client = use(FakeGraph())
+    # The CORS middleware reads ALLOWED_ORIGINS once, when the app module is imported.
+    origin = get_settings().allowed_origins[0]
 
     allowed = client.options(
-        "/plan",
-        headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": "POST"},
+        "/plan", headers={"Origin": origin, "Access-Control-Request-Method": "POST"}
     )
     denied = client.options(
         "/plan",
         headers={"Origin": "http://evil.example", "Access-Control-Request-Method": "POST"},
     )
 
-    assert allowed.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert allowed.headers["access-control-allow-origin"] == origin
     assert "access-control-allow-origin" not in denied.headers
 
 
@@ -219,9 +223,21 @@ def test_startup_fails_fast_without_an_api_key():
         pass
 
 
-def test_startup_builds_the_graph_and_closes_resources(monkeypatch: pytest.MonkeyPatch):
+def test_startup_builds_the_graph_and_shutdown_closes_the_http_client(
+    monkeypatch: pytest.MonkeyPatch,
+):
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key-not-used")
+    created: list[httpx.AsyncClient] = []
+
+    def recording_client(user_agent: str) -> httpx.AsyncClient:
+        created.append(real_create_http_client(user_agent))
+        return created[-1]
+
+    monkeypatch.setattr(main, "create_http_client", recording_client)
 
     with TestClient(app) as client:
         graph = client.app.state.graph
         assert set(graph.get_graph().nodes) >= {"Supervisor", "WeatherAdvisor", "Finalize"}
+        assert not created[0].is_closed
+
+    assert created[0].is_closed

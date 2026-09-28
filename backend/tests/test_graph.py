@@ -1,11 +1,13 @@
 from datetime import date
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.errors import GraphRecursionError
 
 from app.agents.common import FINISH
 from app.agents.finalizer import EMPTY_ANSWER_FALLBACK
 from app.agents.specialists import FLIGHT_EXPERT, HOTEL_SCOUT
-from app.graph.workflow import build_graph, initial_state, recursion_limit_for, run_config
+from app.graph.workflow import build_graph, initial_state, run_config
 from app.tools.trip_weather import create_trip_weather_tool
 from tests.fakes import Call, ScriptedChatModel, StubWeatherProvider, reply, route
 
@@ -182,8 +184,28 @@ async def test_simulated_specialists_are_labelled_in_their_report_and_the_answer
     assert HOTEL_SCOUT.source_note not in answer
 
 
-def test_recursion_limit_covers_the_step_budget():
-    # Supervisor + max_steps * (specialist + Supervisor) + Finalize super-steps must fit.
-    for max_steps in (1, 6, 20):
-        assert recursion_limit_for(max_steps) >= 2 + 2 * max_steps
-    assert run_config(6)["recursion_limit"] == recursion_limit_for(6)
+def always_route_to(specialist: str):
+    def respond(call: Call) -> AIMessage:
+        return route(specialist) if call.is_route else reply("more")
+
+    return respond
+
+
+@pytest.mark.parametrize("max_steps", [1, 2, 5])
+async def test_recursion_limit_never_preempts_the_step_budget(max_steps: int):
+    llm = ScriptedChatModel(script=always_route_to("FlightExpert"))
+
+    state = await run(llm, [HumanMessage("Flights")], max_steps=max_steps)
+
+    assert state["finish_reason"] == "step_budget"
+    assert state["step_count"] == max_steps
+
+
+async def test_recursion_limit_stops_a_run_whose_budget_is_too_large():
+    llm = ScriptedChatModel(script=always_route_to("FlightExpert"))
+    graph = build_graph(llm, create_trip_weather_tool(StubWeatherProvider()), today=lambda: TODAY)
+
+    with pytest.raises(GraphRecursionError):
+        await graph.ainvoke(
+            initial_state([HumanMessage("Flights")], max_steps=100), config=run_config(3)
+        )
