@@ -3,6 +3,7 @@ from datetime import date
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agents.common import FINISH
+from app.agents.specialists import FLIGHT_EXPERT, HOTEL_SCOUT
 from app.graph.workflow import build_graph, initial_state, recursion_limit_for, run_config
 from tests.fakes import Call, ScriptedChatModel, reply, route
 
@@ -121,6 +122,20 @@ async def test_reports_are_attributed_and_consolidated_by_the_finalizer():
     answer = final_answer(state)
     assert answer.startswith("Your Lisbon weekend: fly TAP, stay in Chiado.")
     assert state["messages"][-1].name is None
+
+
+async def test_simulated_specialists_are_labelled_in_their_report_and_the_answer():
+    llm = ScriptedChatModel(
+        script=[route("FlightExpert"), reply("TAP direct."), route(FINISH), reply("Fly TAP.")]
+    )
+
+    state = await run(llm, [HumanMessage("Flights Basel to Lisbon on Oct 3")])
+
+    flight_report = state["messages"][1]
+    assert flight_report.content.startswith(f"Note: {FLIGHT_EXPERT.source_note}")
+    answer = final_answer(state)
+    assert f"Data sources:\n- {FLIGHT_EXPERT.source_note}" in answer
+    assert HOTEL_SCOUT.source_note not in answer
 
 
 def test_recursion_limit_covers_the_step_budget():

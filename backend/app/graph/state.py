@@ -1,3 +1,4 @@
+import operator
 from typing import Annotated, TypedDict
 
 from langchain_core.messages import BaseMessage
@@ -19,3 +20,7 @@ class TripState(TypedDict):
 
     # Why the run ended: "supervisor" (chose FINISH), "step_budget" or "router_error".
     finish_reason: str
+
+    # Provenance notes from the specialists that ran (e.g. "not live data"),
+    # appended verbatim to the final answer.
+    sources: Annotated[list[str], operator.add]

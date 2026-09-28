@@ -12,6 +12,8 @@ user from the specialists' reports.
 remove repetition.
 - Use only facts from the reports. Do not add flights, hotels, prices or weather they do not \
 contain.
+- Keep flights and hotels framed as illustrative examples, not bookable quotes.
+- If a report says data was unavailable, say so plainly instead of filling the gap.
 - If there are no reports, key details are missing: ask one short clarifying question about \
 what is needed (for example destination, dates, departure city or budget).
 Format: plain text, short section titles on their own line, '-' bullets. No Markdown headings, \
@@ -20,6 +22,13 @@ bold or tables."""
 BUDGET_NOTE = """
 The team ran out of steps before finishing. Say briefly which parts of the request are not \
 covered yet."""
+
+
+def data_sources_footer(sources: list[str]) -> str:
+    unique = list(dict.fromkeys(sources))
+    if not unique:
+        return ""
+    return "\n\nData sources:\n" + "\n".join(f"- {source}" for source in unique)
 
 
 def create_finalizer_node(llm: BaseChatModel):
@@ -32,6 +41,7 @@ def create_finalizer_node(llm: BaseChatModel):
             prompt += "\n\nNo specialist was consulted for this request."
 
         response = await llm.ainvoke(build_llm_input(prompt, messages))
-        return {"messages": [AIMessage(content=response.text)]}
+        answer = response.text + data_sources_footer(state.get("sources", []))
+        return {"messages": [AIMessage(content=answer)]}
 
     return finalize
