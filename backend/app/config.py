@@ -10,6 +10,9 @@ from functools import lru_cache
 # `python scripts/list_models.py` to see what your API key can call.
 DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 
+# Nominatim's usage policy requires a User-Agent that identifies the application.
+DEFAULT_HTTP_USER_AGENT = "Navigatio.ai/0.1 (+https://github.com/giovannigiofre/Navigatio.ai)"
+
 
 def _int_env(name: str, default: int, *, minimum: int = 1) -> int:
     raw = os.getenv(name)
@@ -26,12 +29,15 @@ class Settings:
     gemini_model: str = DEFAULT_GEMINI_MODEL
     # Maximum specialist delegations per request before the supervisor is forced to FINISH.
     max_steps: int = 6
+    # Sent with every external API call.
+    http_user_agent: str = DEFAULT_HTTP_USER_AGENT
 
     @classmethod
     def from_env(cls) -> Settings:
         return cls(
             gemini_model=os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
             max_steps=_int_env("MAX_STEPS", 6),
+            http_user_agent=os.getenv("HTTP_USER_AGENT") or DEFAULT_HTTP_USER_AGENT,
         )
 
 

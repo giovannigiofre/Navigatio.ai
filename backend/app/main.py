@@ -10,6 +10,7 @@ load_dotenv()
 
 from app.config import get_settings
 from app.graph.workflow import create_workflow, initial_state, run_config
+from app.tools.http import create_http_client
 
 app = FastAPI(title="Navigatio.ai Agent Backend")
 
@@ -30,7 +31,8 @@ app.add_middleware(
 )
 
 # Initialize the graph
-graph = create_workflow()
+http_client = create_http_client(get_settings().http_user_agent)
+graph = create_workflow(http_client)
 
 
 class PlanRequest(BaseModel):

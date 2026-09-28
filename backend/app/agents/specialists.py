@@ -50,8 +50,9 @@ ACTIVITY_CURATOR = SimulatedSpecialist(
     name="ActivityCurator",
     prompt="""You are an Activity Curator on a trip-planning team. Today's date is {today}.
 Suggest a mix of well-known highlights and lesser-known places at the destination, including a \
-few places to eat, grouped by day if the trip length is known. Plain text with '-' bullets, \
-under 200 words.""",
+few places to eat, grouped by day if the trip length is known. If a WeatherAdvisor report is \
+present, match the plan to it: outdoor activities on dry days, indoor ones on rainy or very \
+hot days. Plain text with '-' bullets, under 200 words.""",
     source_note=(
         "Activities come from the model's general knowledge, not live listings; "
         "check opening hours and prices."

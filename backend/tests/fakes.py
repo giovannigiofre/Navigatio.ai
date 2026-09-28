@@ -90,3 +90,22 @@ def route(next_agent: str, reason: str = "scripted") -> AIMessage:
 
 def reply(text: str) -> AIMessage:
     return AIMessage(content=text)
+
+
+def tool_call(name: str, **args: Any) -> AIMessage:
+    """A model reply that calls tool `name` with `args`."""
+    return AIMessage(
+        content="", tool_calls=[{"name": name, "args": args, "id": f"call-{next(_ids)}"}]
+    )
+
+
+class StubWeatherProvider:
+    """Stands in for TripWeatherService: returns canned results, records requests."""
+
+    def __init__(self, *results: Any) -> None:
+        self._results = list(results)
+        self.requests: list[Any] = []
+
+    async def forecast(self, request: Any) -> Any:
+        self.requests.append(request)
+        return self._results.pop(0)

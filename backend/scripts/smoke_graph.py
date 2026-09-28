@@ -11,6 +11,7 @@ from langchain_core.messages import HumanMessage
 
 from app.config import get_settings
 from app.graph.workflow import create_workflow, initial_state, run_config
+from app.tools.http import create_http_client
 
 DEFAULT_REQUEST = (
     "I want to go to Paris for a weekend in May. I like art and good food. Budget is flexible."
@@ -20,15 +21,16 @@ DEFAULT_REQUEST = (
 async def main(user_input: str) -> None:
     load_dotenv()
     settings = get_settings()
-    graph = create_workflow(settings)
     state = initial_state([HumanMessage(content=user_input)], settings.max_steps)
 
     print(f"User: {user_input}\n" + "-" * 50)
-    async for update in graph.astream(
-        state, config=run_config(settings.max_steps), stream_mode="updates"
-    ):
-        for node, value in update.items():
-            print(f"[{node}] {value}\n" + "-" * 20)
+    async with create_http_client(settings.http_user_agent) as http:
+        graph = create_workflow(http, settings)
+        async for update in graph.astream(
+            state, config=run_config(settings.max_steps), stream_mode="updates"
+        ):
+            for node, value in update.items():
+                print(f"[{node}] {value}\n" + "-" * 20)
 
 
 if __name__ == "__main__":

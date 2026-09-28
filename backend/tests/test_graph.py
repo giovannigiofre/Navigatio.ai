@@ -5,13 +5,17 @@ from langchain_core.messages import AIMessage, HumanMessage
 from app.agents.common import FINISH
 from app.agents.specialists import FLIGHT_EXPERT, HOTEL_SCOUT
 from app.graph.workflow import build_graph, initial_state, recursion_limit_for, run_config
-from tests.fakes import Call, ScriptedChatModel, reply, route
+from app.tools.trip_weather import create_trip_weather_tool
+from tests.fakes import Call, ScriptedChatModel, StubWeatherProvider, reply, route
 
 TODAY = date(2026, 9, 28)
 
 
-async def run(llm: ScriptedChatModel, messages, max_steps: int = 6) -> dict:
-    graph = build_graph(llm, today=lambda: TODAY)
+async def run(
+    llm: ScriptedChatModel, messages, max_steps: int = 6, weather: StubWeatherProvider | None = None
+) -> dict:
+    weather_tool = create_trip_weather_tool(weather or StubWeatherProvider())
+    graph = build_graph(llm, weather_tool, today=lambda: TODAY)
     return await graph.ainvoke(initial_state(messages, max_steps), config=run_config(max_steps))
 
 

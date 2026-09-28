@@ -5,7 +5,7 @@ from typing import Literal, get_args
 
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 
-SpecialistName = Literal["FlightExpert", "HotelScout", "ActivityCurator"]
+SpecialistName = Literal["FlightExpert", "HotelScout", "ActivityCurator", "WeatherAdvisor"]
 SPECIALISTS: tuple[str, ...] = get_args(SpecialistName)
 FINISH = "FINISH"
 
