@@ -117,25 +117,24 @@ class OpenMeteoClient:
         )
         try:
             daily = _ForecastResponse.model_validate(payload).daily
-        except ValidationError as exc:
-            raise UpstreamError(SERVICE, "unexpected response shape", retryable=False) from exc
-
-        return [
-            DailyWeather(
-                date=day,
-                summary=describe_weather_code(code),
-                temperature_max_c=t_max,
-                temperature_min_c=t_min,
-                precipitation_mm=rain,
-                precipitation_probability_pct=None if prob is None else round(prob),
-            )
-            for day, code, t_max, t_min, rain, prob in zip(
-                daily.time,
-                daily.weather_code,
-                daily.temperature_2m_max,
-                daily.temperature_2m_min,
-                daily.precipitation_sum,
-                daily.precipitation_probability_max,
-                strict=True,
-            )
-        ]
+            return [
+                DailyWeather(
+                    date=day,
+                    summary=describe_weather_code(code),
+                    temperature_max_c=t_max,
+                    temperature_min_c=t_min,
+                    precipitation_mm=rain,
+                    precipitation_probability_pct=None if prob is None else round(prob),
+                )
+                for day, code, t_max, t_min, rain, prob in zip(
+                    daily.time,
+                    daily.weather_code,
+                    daily.temperature_2m_max,
+                    daily.temperature_2m_min,
+                    daily.precipitation_sum,
+                    daily.precipitation_probability_max,
+                    strict=True,
+                )
+            ]
+        except (ValidationError, ValueError) as exc:  # includes round(NaN)
+            raise UpstreamError(SERVICE, "unexpected response data", retryable=False) from exc

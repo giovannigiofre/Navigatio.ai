@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import date
 
 import httpx
@@ -302,3 +303,49 @@ def test_tool_input_rejects_end_before_start():
         TripWeatherRequest(
             destination="Lisbon", start_date=date(2026, 10, 5), end_date=date(2026, 10, 3)
         )
+
+
+# --- degradation beyond HTTP errors -----------------------------------------------------
+
+
+async def test_a_hanging_lookup_is_cut_off_by_the_deadline():
+    class HangingGeocoder:
+        async def geocode(self, query: str) -> Place | None:
+            await asyncio.sleep(10)
+            return None
+
+    service = TripWeatherService(
+        HangingGeocoder(),
+        OpenMeteoClient(httpx.AsyncClient()),
+        today=lambda: TODAY,
+        deadline_s=0.05,
+    )
+
+    result = await service.forecast(TRIP)
+
+    assert isinstance(result, ToolError)
+    assert result.kind == "upstream_unavailable"
+    assert "did not finish within 0.05 s" in result.message
+
+
+async def test_invalid_coordinates_from_nominatim_are_an_upstream_error(http, clock, respx_mock):
+    respx_mock.get(NOMINATIM_SEARCH_URL).respond(200, json=[{**LISBON_HIT[0], "lat": "123.4"}])
+
+    result = await make_service(http, clock).forecast(TRIP)
+
+    assert isinstance(result, ToolError)
+    assert result.kind == "upstream_unavailable"  # not blamed on the model's arguments
+
+
+async def test_nan_in_the_forecast_is_an_upstream_error(http, clock, respx_mock):
+    respx_mock.get(NOMINATIM_SEARCH_URL).respond(200, json=LISBON_HIT)
+    daily = {**FORECAST["daily"], "precipitation_probability_max": [float("nan"), 70]}
+    body = json.dumps({**FORECAST, "daily": daily})  # json.loads accepts the NaN token
+    respx_mock.get(OPEN_METEO_FORECAST_URL).respond(
+        200, content=body, headers={"Content-Type": "application/json"}
+    )
+
+    result = await make_service(http, clock).forecast(TRIP)
+
+    assert isinstance(result, ToolError)
+    assert result.kind == "upstream_unavailable"

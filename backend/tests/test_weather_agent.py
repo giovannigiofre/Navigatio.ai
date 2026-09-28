@@ -130,3 +130,28 @@ async def test_missing_dates_means_no_tool_call():
     assert weather.requests == []
     assert weather_report(state).content == "I need the travel dates to check the forecast."
     assert "Data sources" not in state["messages"][-1].content
+
+
+async def test_several_destinations_are_looked_up_and_summarised_together():
+    porto = FORECAST.model_copy(update={"place": LISBON.model_copy(update={"name": "Porto"})})
+    weather = StubWeatherProvider(FORECAST, porto)
+    both = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": TOOL_NAME,
+                "args": {"destination": city, "start_date": "2026-10-03", "end_date": "2026-10-04"},
+                "id": f"call-{city}",
+            }
+            for city in ("Lisbon", "Porto")
+        ],
+    )
+    llm = ScriptedChatModel(
+        script=[route("WeatherAdvisor"), both, reply("Both rainy."), route(FINISH), reply("ok")]
+    )
+
+    await run(llm, REQUEST, weather=weather)
+
+    assert sorted(r.destination for r in weather.requests) == ["Lisbon", "Porto"]
+    summary_prompt = llm.calls[2].system_prompt
+    assert "Lisbon, Portugal" in summary_prompt and "Porto" in summary_prompt

@@ -82,17 +82,16 @@ class NominatimClient:
         )
         try:
             hits = _HITS.validate_python(payload)
+            if not hits:
+                return None
+            hit = hits[0]
+            place = Place(
+                name=hit.display_name,
+                latitude=hit.lat,
+                longitude=hit.lon,
+                country_code=hit.address.country_code if hit.address else None,
+            )
         except ValidationError as exc:
-            raise UpstreamError(SERVICE, "unexpected response shape", retryable=False) from exc
-        if not hits:
-            return None
-
-        hit = hits[0]
-        place = Place(
-            name=hit.display_name,
-            latitude=hit.lat,
-            longitude=hit.lon,
-            country_code=hit.address.country_code if hit.address else None,
-        )
+            raise UpstreamError(SERVICE, "unexpected response data", retryable=False) from exc
         self._cache.set(key, place)
         return place

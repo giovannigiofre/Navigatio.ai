@@ -6,6 +6,7 @@ every tool call fails, the report is a fixed message and the model is not
 asked to write about weather it does not have.
 """
 
+import asyncio
 import logging
 from collections.abc import Callable
 from datetime import date
@@ -83,7 +84,9 @@ def create_weather_advisor_node(
             text = request.text or "No forecast: the destination or dates are missing."
             return {"messages": [AIMessage(content=text, name=NAME)]}
 
-        results = [await run_weather_tool(weather_tool, call) for call in calls]
+        # Concurrent: each lookup has its own deadline, and Nominatim calls are still
+        # spaced by the shared rate limiter.
+        results = await asyncio.gather(*(run_weather_tool(weather_tool, call) for call in calls))
         trace_detail = {"tool_calls": [_trace_entry(weather_tool, r) for r in results]}
         errors = [r for r in results if isinstance(r, ToolError)]
         if len(errors) == len(results):

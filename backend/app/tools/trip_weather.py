@@ -1,5 +1,6 @@
 """The get_trip_weather tool: geocode a destination, then fetch its daily forecast."""
 
+import asyncio
 import logging
 from collections.abc import Callable
 from datetime import date, timedelta
@@ -23,6 +24,10 @@ from app.tools.rate_limit import AsyncRateLimiter
 from app.tools.weather import FORECAST_HORIZON_DAYS, OpenMeteoClient
 
 logger = logging.getLogger(__name__)
+
+# Upper bound for one lookup, retries and rate-limit waits included. Without it, a
+# hanging upstream costs 3 attempts x 10 s read timeout plus backoff.
+DEFAULT_DEADLINE_S = 20.0
 
 TOOL_NAME = "get_trip_weather"
 TOOL_DESCRIPTION = (
@@ -55,10 +60,12 @@ class TripWeatherService:
         forecaster: Forecaster,
         *,
         today: Callable[[], date] = date.today,
+        deadline_s: float = DEFAULT_DEADLINE_S,
     ) -> None:
         self._geocoder = geocoder
         self._forecaster = forecaster
         self._today = today
+        self._deadline_s = deadline_s
 
     async def forecast(self, request: TripWeatherRequest) -> TripWeatherResult:
         today = self._today()
@@ -77,6 +84,19 @@ class TripWeatherService:
         start = max(request.start_date, today)
         end = min(request.end_date, horizon_end)
 
+        try:
+            async with asyncio.timeout(self._deadline_s):
+                return await self._lookup(request, start, end)
+        except TimeoutError:
+            logger.warning("weather lookup timed out", extra={"deadline_s": self._deadline_s})
+            return ToolError(
+                kind="upstream_unavailable",
+                message=f"The weather lookup did not finish within {self._deadline_s:g} s.",
+            )
+
+    async def _lookup(
+        self, request: TripWeatherRequest, start: date, end: date
+    ) -> TripWeatherResult:
         try:
             place = await self._geocoder.geocode(request.destination)
         except UpstreamError as exc:
@@ -115,6 +135,7 @@ def build_trip_weather_service(
     *,
     geocode_min_interval_s: float = 1.0,
     geocode_cache_ttl_s: float = 24 * 3600,
+    deadline_s: float = DEFAULT_DEADLINE_S,
     today: Callable[[], date] = date.today,
 ) -> TripWeatherService:
     """Production wiring. The rate limiter and cache live as long as the service."""
@@ -123,7 +144,7 @@ def build_trip_weather_service(
         rate_limiter=AsyncRateLimiter(geocode_min_interval_s),
         cache=TTLCache(ttl_s=geocode_cache_ttl_s),
     )
-    return TripWeatherService(geocoder, OpenMeteoClient(http), today=today)
+    return TripWeatherService(geocoder, OpenMeteoClient(http), today=today, deadline_s=deadline_s)
 
 
 def create_trip_weather_tool(provider: TripWeatherProvider) -> BaseTool:
