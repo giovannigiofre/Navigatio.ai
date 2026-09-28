@@ -1,22 +1,13 @@
-from typing import TypedDict, Annotated, List, Optional, Dict, Any
-import operator
+from typing import Annotated, TypedDict
+
 from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
+
 
 class TripState(TypedDict):
-    """
-    The global state of the trip planning process.
-    """
-    messages: Annotated[List[BaseMessage], operator.add]
-    destination: Optional[str]
-    start_date: Optional[str]
-    end_date: Optional[str]
-    budget: Optional[str]
-    
-    # The current working itinerary draft
-    itinerary: Optional[Dict[str, Any]]
-    
-    # Track which agent is currently acting or next to act
-    next_agent: Optional[str]
-    
-    # Error tracking
-    error: Optional[str]
+    """Shared state of one planning run."""
+
+    messages: Annotated[list[BaseMessage], add_messages]
+
+    # Routing decision written by the Supervisor and read by its conditional edge.
+    next_agent: str

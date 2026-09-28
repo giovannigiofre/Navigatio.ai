@@ -57,5 +57,5 @@ def create_supervisor_node(llm: ChatGoogleGenerativeAI):
         prompt
         | llm.bind_tools(tools=[route_tool], tool_choice="route")
         | JsonOutputToolsParser()
-        | (lambda x: x[0]["args"] if x else {"next": "FINISH"})
+        | (lambda x: {"next_agent": x[0]["args"]["next"] if x else "FINISH"})
     )

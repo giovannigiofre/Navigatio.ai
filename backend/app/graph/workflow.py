@@ -34,7 +34,7 @@ def create_workflow():
     
     workflow.add_conditional_edges(
         "Supervisor",
-        lambda x: x["next"] if x["next"] in conditional_map else "FINISH",
+        lambda x: x["next_agent"] if x["next_agent"] in conditional_map else "FINISH",
         conditional_map
     )
     
