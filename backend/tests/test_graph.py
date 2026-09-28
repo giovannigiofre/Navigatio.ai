@@ -3,6 +3,7 @@ from datetime import date
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agents.common import FINISH
+from app.agents.finalizer import EMPTY_ANSWER_FALLBACK
 from app.agents.specialists import FLIGHT_EXPERT, HOTEL_SCOUT
 from app.graph.workflow import build_graph, initial_state, recursion_limit_for, run_config
 from app.tools.trip_weather import create_trip_weather_tool
@@ -99,6 +100,14 @@ async def test_step_budget_forces_termination():
         "decision": FINISH,
         "reason": "step budget exhausted",
     }
+
+
+async def test_an_empty_model_answer_is_replaced_by_a_fallback():
+    llm = ScriptedChatModel(script=[route(FINISH), reply("")])
+
+    state = await run(llm, [HumanMessage("Hi")])
+
+    assert final_answer(state) == EMPTY_ANSWER_FALLBACK
 
 
 async def test_invalid_route_output_ends_the_run():

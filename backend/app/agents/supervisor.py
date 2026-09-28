@@ -12,8 +12,6 @@ from app.graph.state import TripState
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAX_STEPS = 6
-
 SYSTEM_PROMPT = """You are the supervisor of a trip-planning team. You do not write the plan \
 yourself: you decide which specialist acts next, or FINISH. Today's date is {today}.
 
@@ -64,8 +62,9 @@ def create_supervisor_node(llm: BaseChatModel, today: Callable[[], date] = date.
     router = llm.with_structured_output(RouteDecision, include_raw=True)
 
     async def supervisor(state: TripState) -> dict:
-        step_count = state.get("step_count", 0)
-        max_steps = state.get("max_steps", DEFAULT_MAX_STEPS)
+        # Both are set by workflow.initial_state(); the budget comes from Settings.max_steps.
+        step_count = state["step_count"]
+        max_steps = state["max_steps"]
 
         if step_count >= max_steps:
             logger.warning(

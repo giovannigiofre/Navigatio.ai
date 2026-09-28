@@ -20,6 +20,10 @@ is not about travel planning, answer briefly and say what you can help with.
 Format: plain text, short section titles on their own line, '-' bullets. No Markdown headings, \
 bold or tables."""
 
+EMPTY_ANSWER_FALLBACK = (
+    "Sorry, I could not put together an answer this time. Please try rephrasing your request."
+)
+
 BUDGET_NOTE = """
 The team ran out of steps before finishing. Say briefly which parts of the request are not \
 covered yet."""
@@ -42,7 +46,8 @@ def create_finalizer_node(llm: BaseChatModel):
             prompt += "\n\nNo specialist was consulted for this request."
 
         response = await llm.ainvoke(build_llm_input(prompt, messages))
-        answer = response.text + data_sources_footer(state.get("sources", []))
+        text = response.text.strip() or EMPTY_ANSWER_FALLBACK
+        answer = text + data_sources_footer(state.get("sources", []))
         return {"messages": [AIMessage(content=answer)]}
 
     return finalize
