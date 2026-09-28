@@ -31,6 +31,7 @@ class Settings:
     max_steps: int = 6
     # Sent with every external API call.
     http_user_agent: str = DEFAULT_HTTP_USER_AGENT
+    log_level: str = "INFO"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -38,6 +39,7 @@ class Settings:
             gemini_model=os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
             max_steps=_int_env("MAX_STEPS", 6),
             http_user_agent=os.getenv("HTTP_USER_AGENT") or DEFAULT_HTTP_USER_AGENT,
+            log_level=os.getenv("LOG_LEVEL", "INFO"),
         )
 
 
