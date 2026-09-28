@@ -8,6 +8,7 @@
     "backend": "cd backend && uvicorn app.main:app --reload",
     "start": "concurrently \"npm run backend\" \"npm run dev\"",
     "build": "vite build",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },
   "dependencies": {
