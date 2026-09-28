@@ -6,15 +6,15 @@ import uuid
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_core.messages import HumanMessage
-from pydantic import BaseModel
 
 # Load backend/.env before any setting is read.
 load_dotenv()
 
 from app.config import get_settings  # noqa: E402
+from app.conversation import build_conversation  # noqa: E402
 from app.graph.workflow import create_workflow, initial_state, run_config  # noqa: E402
 from app.logging_config import configure_logging, request_id_var  # noqa: E402
+from app.schemas import PlanRequest  # noqa: E402
 from app.tools.http import create_http_client  # noqa: E402
 
 configure_logging(get_settings().log_level)
@@ -65,16 +65,13 @@ http_client = create_http_client(get_settings().http_user_agent)
 graph = create_workflow(http_client)
 
 
-class PlanRequest(BaseModel):
-    message: str
-    history: list[dict] | None = []
-
-
 @app.post("/plan")
 async def plan_trip(request: PlanRequest):
     try:
-        max_steps = get_settings().max_steps
-        inputs = initial_state([HumanMessage(content=request.message)], max_steps)
+        settings = get_settings()
+        max_steps = settings.max_steps
+        messages = build_conversation(request.history, request.message, settings.max_history_turns)
+        inputs = initial_state(messages, max_steps)
 
         # Run the graph
         # In a real app, we would stream this or use a background task

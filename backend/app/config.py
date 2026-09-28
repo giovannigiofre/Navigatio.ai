@@ -39,6 +39,8 @@ class Settings:
     gemini_model: str = DEFAULT_GEMINI_MODEL
     # Maximum specialist delegations per request before the supervisor is forced to FINISH.
     max_steps: int = 6
+    # Earlier chat turns passed to the graph with each request (older ones are dropped).
+    max_history_turns: int = 20
     # Sent with every external API call.
     http_user_agent: str = DEFAULT_HTTP_USER_AGENT
     log_level: str = "INFO"
@@ -50,6 +52,7 @@ class Settings:
         return cls(
             gemini_model=os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
             max_steps=_int_env("MAX_STEPS", 6),
+            max_history_turns=_int_env("MAX_HISTORY_TURNS", 20, minimum=0),
             http_user_agent=os.getenv("HTTP_USER_AGENT") or DEFAULT_HTTP_USER_AGENT,
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             allowed_origins=_list_env("ALLOWED_ORIGINS", DEFAULT_ALLOWED_ORIGINS),
