@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph, END
 from langchain_google_genai import ChatGoogleGenerativeAI
-import os
 
+from app.config import get_settings
 from app.graph.state import TripState
 from app.agents.supervisor import create_supervisor_node
 from app.agents.specialists import get_specialists
@@ -9,8 +9,7 @@ from app.agents.specialists import get_specialists
 def create_workflow():
     # Initialize LLM
     # Note: Requires GOOGLE_API_KEY in environment
-    # Using gemini-2.5-flash-preview due to quota limits on gemini-2.5-pro
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-09-2025")
+    llm = ChatGoogleGenerativeAI(model=get_settings().gemini_model)
     
     # Create Nodes
     supervisor_node = create_supervisor_node(llm)
