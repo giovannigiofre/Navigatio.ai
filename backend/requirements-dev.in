@@ -1,0 +1,8 @@
+# Test and lint tooling, constrained to the runtime lock. requirements-dev.txt is generated from this file:
+#   uv pip compile requirements-dev.in -o requirements-dev.txt --python-version 3.12 --universal
+-c requirements.txt
+-r requirements.in
+pytest
+pytest-asyncio
+respx
+ruff

@@ -1,6 +1,7 @@
 import React from 'react';
-import { Message, Sender, AgentAction } from '../types';
-import { Bot, User, Cpu, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
+import { Message, Sender } from '../types';
+import { Bot, User } from 'lucide-react';
+import { AgentTrace } from './AgentTrace';
 
 interface ChatMessageProps {
   message: Message;
@@ -23,28 +24,11 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
         {/* Content Wrapper */}
         <div className="flex flex-col gap-2">
           
-          {/* Agent Actions (Thinking Process) */}
-          {message.agentActions && message.agentActions.length > 0 && (
-            <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-xs text-slate-600 mb-1 space-y-2">
-              <div className="flex items-center gap-2 font-medium text-slate-500 uppercase tracking-wider text-[10px]">
-                <Cpu size={12} /> Agent Thought Process
-              </div>
-              {message.agentActions.map((action, idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  {action.status === 'running' && <Loader2 size={12} className="animate-spin text-brand-500" />}
-                  {action.status === 'completed' && <CheckCircle2 size={12} className="text-emerald-500" />}
-                  {action.status === 'failed' && <AlertCircle size={12} className="text-red-500" />}
-                  <span className={action.status === 'running' ? 'text-slate-800' : 'text-slate-500'}>
-                    {action.message}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+          {message.run && <AgentTrace run={message.run} />}
 
           {/* Message Text */}
           <div className={`
-            p-4 rounded-2xl shadow-sm text-sm leading-relaxed
+            p-4 rounded-2xl shadow-sm text-sm leading-relaxed whitespace-pre-wrap break-words
             ${isUser 
               ? 'bg-brand-600 text-white rounded-tr-none' 
               : 'bg-white border border-slate-100 text-slate-800 rounded-tl-none'}

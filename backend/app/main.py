@@ -1,67 +1,218 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
-from langchain_core.messages import HumanMessage
-from dotenv import load_dotenv
+"""FastAPI app: POST /plan runs the agent graph, GET /health reports liveness."""
 
-# Load environment variables
+import asyncio
+import logging
+import os
+import re
+import time
+import uuid
+from contextlib import asynccontextmanager
+from typing import Annotated
+
+import httpx
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from google.genai.errors import APIError as GenAIAPIError
+from langchain_core.exceptions import ModelError
+from langchain_core.runnables import Runnable
+from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+# Load backend/.env before any setting is read.
 load_dotenv()
 
-from app.graph.workflow import create_workflow
+from app.config import Settings, get_settings  # noqa: E402
+from app.conversation import build_conversation  # noqa: E402
+from app.graph.workflow import create_workflow, initial_state, run_config  # noqa: E402
+from app.logging_config import configure_logging, request_id_var  # noqa: E402
+from app.schemas import (  # noqa: E402
+    ErrorDetail,
+    ErrorResponse,
+    HealthResponse,
+    PlanRequest,
+    PlanResponse,
+    TraceStep,
+)
+from app.tools.http import create_http_client  # noqa: E402
 
-app = FastAPI(title="Navigatio.ai Agent Backend")
+configure_logging(get_settings().log_level)
+logger = logging.getLogger("app.api")
 
-# Configure CORS - must be added before routes
+# Errors raised by the Gemini client (auth, quota, invalid request, 5xx after its retries).
+# Timeouts and connection failures surface as raw httpx exceptions after its retries.
+# The weather tool never lets httpx errors escape (they become ToolErrors), so at this
+# level they come from the LLM client.
+LLM_PROVIDER_ERRORS = (ChatGoogleGenerativeAIError, GenAIAPIError, ModelError, httpx.TransportError)
+
+
+class ApiError(Exception):
+    """An error returned to the client as {"error": {...}} with a safe, generic message."""
+
+    def __init__(self, status_code: int, code: str, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
+        self.message = message
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Create the shared HTTP client and the graph once; close the client on shutdown."""
+    settings = get_settings()
+    if not (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")):
+        raise RuntimeError(
+            "GOOGLE_API_KEY is not set: copy backend/.env.example to backend/.env and add a key."
+        )
+    async with create_http_client(settings.http_user_agent) as http:
+        app.state.graph = create_workflow(http, settings)
+        logger.info(
+            "startup complete",
+            extra={"model": settings.gemini_model, "max_steps": settings.max_steps},
+        )
+        yield
+
+
+app = FastAPI(title="Navigatio.ai Agent Backend", lifespan=lifespan)
+
+_REQUEST_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    """Tag the request (and every log line it produces) with an id, and log its latency."""
+    incoming = request.headers.get("X-Request-ID", "")
+    request_id = incoming if _REQUEST_ID.fullmatch(incoming) else uuid.uuid4().hex
+    token = request_id_var.set(request_id)
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        logger.info(
+            "request complete",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+            },
+        )
+        return response
+    finally:
+        request_id_var.reset(token)
+
+
+# Added last, so it is the outermost middleware and also answers preflight requests.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://192.168.1.199:3000",  # Network access
-    ],
-    allow_credentials=False,  # Set to False to avoid CORS issues with credentials
+    allow_origins=list(get_settings().allowed_origins),
+    allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Accept"],
-    max_age=3600,  # Cache preflight responses for 1 hour
+    allow_headers=["Content-Type", "Accept", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
+    max_age=3600,
 )
 
-# Initialize the graph
-graph = create_workflow()
 
-class PlanRequest(BaseModel):
-    message: str
-    history: Optional[List[Dict[str, Any]]] = []
+def _error_response(
+    status_code: int, code: str, message: str, details: list[dict] | None = None
+) -> JSONResponse:
+    body = ErrorResponse(
+        error=ErrorDetail(
+            code=code, message=message, request_id=request_id_var.get(), details=details
+        )
+    )
+    return JSONResponse(status_code=status_code, content=body.model_dump(exclude_none=True))
 
-@app.options("/plan")
-async def plan_options():
-    return {"status": "ok"}
 
-@app.post("/plan")
-async def plan_trip(request: PlanRequest):
+@app.exception_handler(ApiError)
+async def _api_error(request: Request, exc: ApiError) -> JSONResponse:
+    return _error_response(exc.status_code, exc.code, exc.message)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    # 404/405 and friends, in the same envelope as every other error.
+    return _error_response(exc.status_code, "http_error", str(exc.detail))
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    # Report where and why, without echoing the submitted values back.
+    details = [{"loc": list(err["loc"]), "msg": err["msg"]} for err in exc.errors()]
+    return _error_response(422, "invalid_request", "The request is invalid.", details)
+
+
+def get_graph(request: Request) -> Runnable:
+    return request.app.state.graph
+
+
+@app.get("/health", response_model=HealthResponse)
+async def health() -> HealthResponse:
+    """Liveness: the process is up and serving requests."""
+    return HealthResponse()
+
+
+@app.post(
+    "/plan",
+    response_model=PlanResponse,
+    responses={
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+        502: {"model": ErrorResponse},
+        504: {"model": ErrorResponse},
+    },
+)
+async def plan_trip(
+    body: PlanRequest,
+    graph: Annotated[Runnable, Depends(get_graph)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> PlanResponse:
+    messages = build_conversation(body.history, body.message, settings.max_history_turns)
+    started = time.perf_counter()
     try:
-        # Convert input to LangChain messages
-        inputs = {
-            "messages": [HumanMessage(content=request.message)]
-        }
-        
-        # Run the graph
-        # In a real app, we would stream this or use a background task
-        final_state = await graph.ainvoke(inputs)
-        
-        # Extract the final response
-        messages = final_state["messages"]
-        last_message = messages[-1].content
-        
-        return {
-            "response": last_message,
-            "trace": [m.content for m in messages]
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        async with asyncio.timeout(settings.graph_timeout_s):
+            state = await graph.ainvoke(
+                initial_state(messages, settings.max_steps),
+                config=run_config(settings.max_steps),
+            )
+        response = PlanResponse(
+            request_id=request_id_var.get() or "",
+            response=state["messages"][-1].text,
+            steps=state.get("step_count", 0),
+            finish_reason=state["finish_reason"],
+            trace=[TraceStep.model_validate(event) for event in state.get("trace", [])],
+        )
+    except TimeoutError as exc:
+        logger.error("plan timed out", extra={"timeout_s": settings.graph_timeout_s})
+        raise ApiError(504, "timeout", "Planning took too long. Please try again.") from exc
+    except httpx.TimeoutException as exc:
+        logger.exception("language model timed out")
+        raise ApiError(
+            504, "llm_timeout", "The language model did not respond in time. Please try again."
+        ) from exc
+    except LLM_PROVIDER_ERRORS as exc:
+        logger.exception("language model error")
+        raise ApiError(
+            502, "llm_unavailable", "The language model is unavailable. Please try again later."
+        ) from exc
+    except Exception as exc:
+        logger.exception("plan failed")
+        raise ApiError(
+            500, "internal_error", "Something went wrong while planning. Please try again."
+        ) from exc
 
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+    logger.info(
+        "plan complete",
+        extra={
+            "steps": response.steps,
+            "finish_reason": response.finish_reason,
+            "nodes": [step.node for step in response.trace],
+            "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+            "history_turns_received": len(body.history),
+            "messages_sent_to_graph": len(messages),
+        },
+    )
+    return response

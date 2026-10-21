@@ -1,61 +1,115 @@
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.output_parsers.openai_tools import JsonOutputToolsParser
-from langchain_google_genai import ChatGoogleGenerativeAI
-from typing import List
+import logging
+from collections.abc import Callable
+from datetime import date
+from typing import Literal
 
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import BaseMessage
+from pydantic import BaseModel, Field
+
+from app.agents.common import FINISH, SpecialistName, build_llm_input, specialist_reports
 from app.graph.state import TripState
 
-# Define the system prompt for the supervisor
-SYSTEM_PROMPT = """You are the Supervisor of an elite travel concierge team.
-Your goal is to orchestrate the creation of a perfect trip itinerary for the user.
+logger = logging.getLogger(__name__)
 
-You have the following specialists at your disposal:
-1. FlightExpert: Finds the best flights.
-2. HotelScout: Finds accommodation that matches the user's vibe.
-3. ActivityCurator: Finds things to do and places to eat.
+SYSTEM_PROMPT = """You are the supervisor of a trip-planning team. You do not write the plan \
+yourself: you decide which specialist acts next, or FINISH. Today's date is {today}.
 
-Your responsibilities:
-1. Analyze the user's request.
-2. Delegate tasks to the appropriate specialist.
-3. If the plan is complete and satisfies the user's request, respond with "FINISH".
-4. If you need more information from the user, respond with "FINISH" and ask the question in the final message.
+Specialists:
+- FlightExpert: flight options between the user's origin and destination.
+- HotelScout: where to stay, matched to the user's style and budget.
+- ActivityCurator: things to do and places to eat at the destination.
+- WeatherAdvisor: live daily weather forecast for the destination and dates. Forecasts only \
+exist up to 16 days ahead, so skip it for trips further out or without dates.
 
-Do not do the work yourself. Delegate to the specialists.
-"""
+Rules:
+- Call only the specialists the request actually needs. "Things to do in Lisbon" needs \
+ActivityCurator only.
+- For a full trip plan with dates in the forecast window, call WeatherAdvisor before \
+ActivityCurator so activities can match the weather.
+- Call each specialist at most once per request unless its report was clearly incomplete.
+- Choose FINISH when the specialists' reports cover the request.
+- Choose FINISH right away when key information is missing (for example no destination, or no \
+dates for flights and hotels): the user will be asked a clarifying question.
 
-options = ["FlightExpert", "HotelScout", "ActivityCurator"]
+Specialist steps used so far: {step_count} of {max_steps}.
+Already consulted for this request: {consulted}."""
 
-# Define the tool for routing
-route_tool = {
-    "name": "route",
-    "description": "Select the next role.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "next": {
-                "type": "string",
-                "enum": options,
-            }
-        },
-        "required": ["next"],
-    },
-}
 
-def create_supervisor_node(llm: ChatGoogleGenerativeAI):
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", SYSTEM_PROMPT),
-            MessagesPlaceholder(variable_name="messages"),
-            (
-                "system",
-                "Given the conversation above, who should act next? Or should we FINISH? Select one of: {options}",
-            ),
-        ]
-    ).partial(options=str(options), team_members=", ".join(options))
+class RouteDecision(BaseModel):
+    """The supervisor's choice of what happens next."""
 
-    return (
-        prompt
-        | llm.bind_tools(tools=[route_tool], tool_choice="route")
-        | JsonOutputToolsParser()
-        | (lambda x: x[0]["args"] if x else {"next": "FINISH"})
+    next: Literal[SpecialistName, "FINISH"] = Field(
+        description="The specialist that should act next, or FINISH to end the run."
     )
+    reason: str = Field(description="One short sentence explaining the choice.")
+
+
+def _router_input(
+    state: TripState, step_count: int, max_steps: int, today: date
+) -> list[BaseMessage]:
+    consulted = [m.name for m in specialist_reports(state["messages"])]
+    prompt = SYSTEM_PROMPT.format(
+        today=today.isoformat(),
+        step_count=step_count,
+        max_steps=max_steps,
+        consulted=", ".join(consulted) if consulted else "none",
+    )
+    return build_llm_input(prompt, state["messages"])
+
+
+def create_supervisor_node(llm: BaseChatModel, today: Callable[[], date] = date.today):
+    router = llm.with_structured_output(RouteDecision, include_raw=True)
+
+    async def supervisor(state: TripState) -> dict:
+        # Both are set by workflow.initial_state(); the budget comes from Settings.max_steps.
+        step_count = state["step_count"]
+        max_steps = state["max_steps"]
+
+        if step_count >= max_steps:
+            logger.warning(
+                "step budget exhausted, forcing FINISH",
+                extra={"step_count": step_count, "max_steps": max_steps},
+            )
+            return {
+                "next_agent": FINISH,
+                "finish_reason": "step_budget",
+                "trace_detail": {"decision": FINISH, "reason": "step budget exhausted"},
+            }
+
+        result = await router.ainvoke(_router_input(state, step_count, max_steps, today()))
+        decision: RouteDecision | None = result["parsed"]
+        if decision is None:
+            logger.error(
+                "supervisor returned no valid route, forcing FINISH",
+                extra={"parsing_error": repr(result["parsing_error"])},
+            )
+            return {
+                "next_agent": FINISH,
+                "finish_reason": "router_error",
+                "trace_detail": {"decision": FINISH, "reason": "invalid routing output"},
+            }
+
+        logger.info(
+            "route decision",
+            extra={
+                "next": decision.next,
+                "reason": decision.reason,
+                "step_count": step_count,
+                "max_steps": max_steps,
+            },
+        )
+        trace_detail = {"decision": decision.next, "reason": decision.reason}
+        if decision.next == FINISH:
+            return {
+                "next_agent": FINISH,
+                "finish_reason": "supervisor",
+                "trace_detail": trace_detail,
+            }
+        return {
+            "next_agent": decision.next,
+            "step_count": step_count + 1,
+            "trace_detail": trace_detail,
+        }
+
+    return supervisor
